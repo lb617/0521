@@ -22,7 +22,7 @@ include_directories(${M1_SDK_INC_DIR}/smartsoc)
 set(SRC_DIR "src")
 set(TARGET $ENV{BASE_DIR}/target)
 include_directories(${CMAKE_SOURCE_DIR}/include)
-message([<mode>] "message to display" ${TARGET})
+message(STATUS "TARGET path: ${TARGET}")
 
 
 # 添加source文件夹下的所有cpp文件

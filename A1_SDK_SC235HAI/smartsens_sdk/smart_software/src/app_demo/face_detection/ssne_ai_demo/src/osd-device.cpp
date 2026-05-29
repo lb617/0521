@@ -55,7 +55,7 @@ void OsdDevice::Initialize(int width, int height, const char* bitmap_lut_path){
     // init quad-rangle layer (TYPE_GRAPHIC) for layers 0-1
     int dma_size = 1024;
     for(int layer_index = 0; layer_index < 2; layer_index++){
-        osd_alloc_buffer(m_osd_handle, m_layer_dma[layer_index].dma, dma_size);sleep(0.25);
+        osd_alloc_buffer(m_osd_handle, m_layer_dma[layer_index].dma, dma_size);usleep(250000);
         osd_alloc_buffer(m_osd_handle, m_layer_dma[layer_index].dma_2, dma_size);
         int dma_fd = osd_get_buffer_fd(m_osd_handle, m_layer_dma[layer_index].dma);
 
@@ -78,7 +78,7 @@ void OsdDevice::Initialize(int width, int height, const char* bitmap_lut_path){
         // DMA size for texture layer: 1920*1080 bytes (full HD resolution)
         int texture_dma_size = 0x20000;
         osd_alloc_buffer(m_osd_handle, m_layer_dma[layer_index].dma, texture_dma_size);
-        sleep(0.25);  // 等待DMA分配完成
+        usleep(250000);  // 等待DMA分配完成
         osd_alloc_buffer(m_osd_handle, m_layer_dma[layer_index].dma_2, texture_dma_size);
         int dma_fd = osd_get_buffer_fd(m_osd_handle, m_layer_dma[layer_index].dma);
 

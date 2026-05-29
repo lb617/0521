@@ -267,8 +267,8 @@ void VISUALIZER::Draw() {
 	quad_rangle_vec.emplace_back(q);
 
 
-    // 调用OSD设备绘制测试矩形框
-    osd_device.Draw(quad_rangle_vec);
+    // 使用 layer 0 绘制，避免清除其他图层
+    osd_device.Draw(quad_rangle_vec, DETECTION_LAYER_ID);
 }
 
 /**

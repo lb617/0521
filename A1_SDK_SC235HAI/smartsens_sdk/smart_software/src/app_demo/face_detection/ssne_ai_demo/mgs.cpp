@@ -43,7 +43,7 @@ static const int GRIMACE_ALERT_THRESHOLD = 7;    // 表情总分 ≥ 7 时触发
 static int uart_init() {
     int fd = open(UART_DEVICE, O_RDWR | O_NOCTTY | O_NDELAY);
     if (fd < 0) {
-        fprintf(stderr, "[UART] Failed to open %s: %s\n", UART_DEVICE, strerror(errno));
+        fprintf(stderr, "[UART] Failed to open %s: %s\n", UART_DEVICE, std::strerror(errno));
         return -1;
     }
 
@@ -82,7 +82,7 @@ static void uart_send_signal(int fd) {
     const char* signal = "1";
     ssize_t written = write(fd, signal, 1);
     if (written < 0) {
-        fprintf(stderr, "[UART] Write failed: %s\n", strerror(errno));
+        fprintf(stderr, "[UART] Write failed: %s\n", std::strerror(errno));
     }
 }
 
@@ -176,6 +176,13 @@ int main() {
     uint16_t model_grimace = ssne_loadmodel(
         const_cast<char*>(path_grimace.c_str()), SSNE_STATIC_ALLOC);
 
+    if (model_quality == 0xFFFF || model_cropper == 0xFFFF || model_grimace == 0xFFFF) {
+        fprintf(stderr, "[ERROR] Model loading failed! quality=%u cropper=%u grimace=%u\n",
+                model_quality, model_cropper, model_grimace);
+        ssne_release();
+        return -1;
+    }
+
     printf("[INFO] Models loaded: quality=%d cropper=%d grimace=%d\n",
            model_quality, model_cropper, model_grimace);
 
@@ -222,7 +229,7 @@ int main() {
 
     // 系统稳定等待
     cout << "sleep for 0.2 second!" << endl;
-    sleep(0.2);
+    usleep(200000);
 
     // 帧计数器
     uint32_t num_frames = 0;

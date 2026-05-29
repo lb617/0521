@@ -64,7 +64,7 @@ int total = eye_score + nose_score + cheek_score + ear_score + whisker_score;
 
 if (total >= 7) {
     printf("[ALERT] TOTAL=%d >= 7, stimulate evacuation!\n", total);
-    uart_send_signal(uart_fd, '1');
+    uart_send_signal(uart_fd);
 }
 ```
 
