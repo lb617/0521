@@ -145,3 +145,32 @@ float face_y2 = y2_norm * img_height;
 - [实验规则 EXPERIMENT_RULES.md](EXPERIMENT_RULES.md)
 - [板上状态 BOARD_STATE.md](BOARD_STATE.md)
 - 部署 pipeline 速查见 vault：`workbench/A1-board-deployment-reference.md`
+
+
+
+李犇/第13周delog；
+1. [mgs.cpp:225] `sleep(0.2)` 系统初始化等待无效
+usleep()` 以微秒为单位，`200000` 微秒 = 0.2 秒，真正实现系统初始化稳定等待。
+2. [osd-device.cpp:58,81] `sleep(0.25)` DMA 缓冲区等待无效
+3. [CMakeLists.txt:25] CMake 语法错误
+原因**: `STATUS` 是标准的 CMake 消息模式，输出带 `--` 前缀的信息行。
+4. [mgs.cpp:46,85] `strerror()` 命名空间问题
+5. [mgs.cpp:179-183] 模型加载无错误检查
+*问题**: `ssne_loadmodel()` 返回的 model_id 未检查有效性。如果模型文件缺失或损坏，返回值可能是 `0xFFFF`（无效句柄），但原代码仅打印 ID 后继续执行，后续 `ssne_inference` 才会崩溃，排查困难。
+6. [utils.cpp:271] 测试用 `Draw()` 会清除所有 OSD 图层
+7. [TECH_DOC.md:67] 文档与代码不一致
+ 8. [tools/inspect_m1model.py] 新增 m1model 离线结构分析工具
+ .m1model` 是 SSNE NPU 私有格式，无法在 PC 上运行推理
+ 9. [tools/test_onnx_models.py] 新增 ONNX 模型 PC 端离线推理验证工具
+ 在 PC 端用 ONNX Runtime 离线验证三个鼠脸检测 ONNX 模型的推理效果，不依赖 M1 硬件。
+ **模型结构分析结果**:
+
+| 模型 | 输入 | 输出 | 节点数 | 参数量 | 主要算子 |
+|------|------|------|--------|--------|----------|
+| frame_quality_lite | [1,1,224,224] float32 | [1,1,1,1] sigmoid | 22 | 210,321 | Conv(9)+Relu(8)+MaxPool(3)+Sigmoid |
+| face_cropper_lite | [1,3,256,256] float32 | [1,5,1,1] sigmoid | 22 | 210,997 | Conv(9)+Relu(8)+MaxPool(3)+Sigmoid |
+| grimace_scorer_lite | [1,3,224,224] float32 | [1,20,1,1] logits | 21 | 422,572 | Conv(9)+Relu(8)+MaxPool(3) |
+
+**验证结果 (2026-05-29)**: **18/18 全部通过**
+
+下一步应该会重写构建一个新的项目文件，目前正在逐步解决编译链问题
