@@ -1,0 +1,32 @@
+# 编译产物
+A1_SDK_SC235HAI/smartsens_sdk/output/
+A1_SDK_SC235HAI/smartsens_sdk/dl/
+A1_SDK_SC235HAI/smartsens_sdk/build/
+A1_SDK_SC235HAI/smartsens_sdk/*.tmp
+A1_SDK_SC235HAI/smartsens_sdk/.tmp/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# 大模型文件（确定 LFS 策略前先全部忽略）
+# 一旦决定用 LFS，移除下面两行并配置 .gitattributes
+# *.onnx
+# *.a1model
+
+# 测试中间产物
+tests/golden_outputs.npz
+tests/board_dumps/
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# 本地配置
+*.local
+.env
