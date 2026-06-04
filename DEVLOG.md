@@ -176,3 +176,124 @@ usleep()` 以微秒为单位，`200000` 微秒 = 0.2 秒，真正实现系统初
 
 
 下一步应该会重写构建一个新的项目文件，目前正在逐步解决编译链问题
+
+
+李犇/第14周debug
+1.build_app.sh 它只重编了旧包，不会编译新的 mouse_face_demo
+写入：rm -rf output/build/mouse_face_demo/  make ssne_ai_demo-rebuild mouse_face_demo-rebuild
+2.现在只有 一个镜像文件，两个 app 都会被打包进同一个 rootfs，也就是说板子上会同时跑两个程序
+defconfig — 把旧人脸检测编译开关注释掉，只保留小鼠检测：BR2_PACKAGE_MOUSE_FACE_DEMO=y
+build_app.sh — 只重编小鼠包：rm -rf output/build/mouse_face_demo/   make mouse_face_demo-rebuild
+3.编译过程会拉取下载一些源码，由于docker容器网络环境隔离，经常卡住，尝试开代理，直连或者tun模式都不行，docker容器内部配置代理也不行
+解决办法：不断ctrl+C，不断重启电脑，然后挂着梯子编译
+第一遍编译完成后，之后的编译都会很流畅，不用挂梯子
+4.编译报错：error: binding reference of type 'std::vector<std::array<float, 4>>&' 
+       to 'const std::vector<std::array<float, 4>>' discards qualifiers
+       把 const 引用传给非 const 引用参数
+utils.cpp 第 33 行 加了一行本地拷贝：void VISUALIZER::Draw(const std::vector<std::array<float, 4>>& boxes)
+{
+    // 拷贝一份，OsdDevice::Draw 需要非 const 引用
+    std::vector<std::array<float, 4>> boxes_copy(boxes);
+    
+    osd_device.Draw(boxes_copy, ...);   // 传拷贝，不是 const 原值
+5.IMAGEPROCESSOR 的三个函数在编译时出现了两份定义:
+  编译流程是：
+
+
+    1. g++ pipeline_image.cpp      → pipeline_image.o    (含 Initialize, GetImage, Release)
+    2. g++ mouse_face_pipeline.cpp → mouse_face_pipeline.o (含 Initialize, GetImage, Release)  ← 重复！
+    3. ld  把两个 .o 链接在一起    → 💥 multiple definition，不知道该用哪份
+    更改：把 mouse_face_pipeline.cpp 里那几十行重复的 IMAGEPROCESSOR 实现代码删掉，替换成一行注释
+6.更改文件后，编译报同样错误，
+    清除旧的编译缓存：rm -rf output/build/mouse_face_demo/ && make mouse_face_demo-rebuild
+7.对于打分模型输出的20个数认知改正，实现：
+    特征1:  [■] [□] [□] [□]   ← level=0, 第0格实心
+    特征2:  [□] [□] [■] [□]   ← level=2, 第2格实心
+    特征3:  [□] [■] [□] [□]   ← level=1, 第1格实心
+8.run.sh没有可执行权限，上板以后没有自动跑起来
+      在 mouse_face_demo.mk 的安装步骤里加了一行：
+
+
+    chmod +x $(TARGET_DIR)/app_demo/scripts/run.sh
+    这样 Buildroot 打包镜像前，run.sh 就会被赋予执行权限。
+9.串口打印卡住，原因移动了模型文件路径，Segfault — 加载失败后没有检查ssne_loadmodel() 失败时返回 0，代码没有检查就直接用了。需要加防御代码。
+    手动添加模型文件；
+        防御性检查（解决 segfault）
+        ssne_loadmodel() 打开文件失败后，model_id 是无效值，后续 SetNormalize 传入无效 id 直接崩溃。现在加了三处文件存在性检查：
+
+
+        if (!file_exists(quality_model.c_str())) {
+            fprintf(stderr, "[ERROR] Model file not found: %s\n", quality_model.c_str());
+            return;  // 提前退出，不会崩溃
+        }
+10.帧质量或者未检测到小鼠面部时串口打印保持静默，不利于判断和调试：增加每 30 帧会自动打印一行调试信息
+
+11.face_cropper 输出的坐标是 0~1 归一化值，不是像素坐标
+直接当 0~1 归一化值处理 × img_width / × img_height，同时加 std::swap 处理可能反转的 x1/x2、y1/y2
+
+
+之前: fx1 = 1.0 × 7.5 = 7px      → 无效
+之后: fx1 = 1.0 × 1920 = 1920px  → 合理
+      fx2 = 0.8 × 1920 = 1536px
+      fx1 > fx2 → swap → fx1=1536, fx2=1920 ✓
+
+12.grimace_scorer 因为无效裁剪区域崩溃
+链式反应：
+face_cropper 输出噪声坐标 → 缩放后框无效 → 回退到全图 
+→ 全图 1920×1080 YUV422_16 → 预处理到 256×224 SSNE_Y_8 
+→ 模型期望的输入格式/数据类型不匹配 → [SSNE] Wrong input tensor!
+crop 无效时设置 grimace_levels[i] = -1，跳过 grimace_scorer 推理，但检测框仍然有效并绘制。主程序检测到 levels[0] < 0 时只画框不画分。
+
+13.帧质量总是卡在0.498，小鼠面部置信度卡在0.5-0.55之间
+    先降低两个阈值：
+            [ERROR] grimace_scorer preprocess failed! ret=504
+            1970-01-01 00:12:49.297574 ERROR  63:3069214080: [S1AIPreprocess]output image dtype=1 but width=105(not divisible by 8); skip run offline pipe!
+            报错刷屏
+            pipeline_image.cpp 里继承了人脸检测 demo 的裁剪设置，传感器输出被裁剪到了1440×1080（左右各裁了 240px）。但代码里坐标是用 1920 来缩放的，结果 SetCrop 传入的坐标超出了 1440 的图像宽度，硬件算出了垃圾值 65288。
+            [ERROR] grimace_scorer preprocess failed! ret=504
+            1970-01-01 00:12:50.983025 ERROR  63:3069169024: [S1AIPreprocess]output image dtype=1 but width=53(not divisible by 8); skip run offline pipe!
+            再次刷屏了
+            在 mouse_face_pipeline.cpp 的 SetCrop 调用前，对坐标做 8 对齐：
+            // x1,y1 向下对齐到 8, x2,y2 向上对齐到 8
+            crop_x1 = (x1 / 8) * 8;       // 例: 1782 → 1782/8=222, 222*8=1776
+            crop_y1 = (y1 / 8) * 8;       // 例: 541  → 541/8=67,   67*8=536
+            crop_x2 = ((x2 + 7) / 8) * 8; // 例: 1918 → 1925/8=240, 240*8=1920
+            crop_y2 = ((y2 + 7) / 8) * 8; // 例: 783  → 790/8=98,   98*8=784
+        
+        传感器数据正常，Pipeline 存在双缓冲交替问题
+        1. pipeline_image.cpp 还留着旧的裁剪参数
+        复制过来后没改，Pipeline 实际输出的是 1440×1080（左右各裁 240px），但代码里存的 img_width=1920。坐标 ×1920 比实际需要的 ×1440 放大了 1.33 倍，导致 bbox 偏位。
+
+        修复：改为全分辨率输出 1920×1080，同时加了 OnlineSetFrameDrop(kPipeline0, 3, 0) 丢弃前 3 帧让双缓冲稳定。
+
+        2. 检测置信度失败时静默跳过
+        之前 det_conf < 0.6 时没有任何打印，所以根本不知道是质量不过还是检测不过。
+
+        修复：加了调试打印，每 5 次质量通过的帧里打印一次低置信度信息。
+
+        3. 数据本身正常
+        传感器确实在工作——同一个模型看到了同一片区域（图像右下部），坐标在帧间有合理漂移。问题只是：
+
+        一半帧是静态缓冲（quality=0.498），加了 FrameDrop 应该能解决
+        det_conf=0.50 说明镜头里可能确实没有小鼠，或者小鼠不在那个位置
+        
+        
+        还是quality卡0.4980，置信度卡0.5013
+        问题不在传感器，也不在模型加载。问题在 Preprocess Pipe 的双缓冲机制。
+        每一个 RunAiPreprocessPipe 调用内部可能使用了双缓冲，两个 buffer 交替返回——一个 buffer 包含真实帧，另一个包含未更新的旧数据。三个模型各有一条独立的 pipe，它们各自的 buffer 交替不同步，导致 quality 取到了"旧 buffer 的默认数据"（0.498）或"真实图像"（0.996）。
+
+        OnlineSetFrameDrop 只影响 Online Pipeline 的帧速率，不影响 Preprocess Pipe 的内部缓冲。
+
+        修复方案：改用 copy_tensor + RunAiPreprocessPipe 直接拿到干净数据
+        问题根源是每次 RunAiPreprocessPipe 的输出 tensor（input_quality/input_detect/input_score）在推理后被"污染"了。正确做法是每次 Preprocess 完后立即推理，不做任何依赖前一帧的操作，同时确保 input tensor 每次都是干净状态。
+
+        实际上当前代码逻辑上已经是一帧一推理的顺序，问题更可能是 create_tensor 创建的是静态 tensor，而 Preprocess Pipe 的行为依赖于 tensor 的内部状态。
+
+        最简单的尝试：把 input 格式从 Y8 改成 BYTES。因为 Y8 格式可能触发预处理管道的特定行为（只读亮度通道），而 BYTES 格式让模型内部的预处理自行处理格式转换。
+        rameDrop 不是全部问题。在加 FrameDrop 之前，quality 已经是二值的了（0.4980 vs 0.9961）。FrameDrop 只是让坏帧比例从 50% 变成了 70%。
+
+        真正的问题很可能在预处理管的格式转换。现有 demo 使用的是 YUV→RGB 转换，一直正常工作。而我们的 quality 和 scorer 模型用的是 YUV→Y8（灰阶）。硬件预处理管可能对 SSNE_Y_8 输出格式的支持有 bug，导致输出 tensor 的数据状态不稳定。
+        复尝试：把灰阶改为 RGB
+        模型实际接受 3 通道 RGB 和 1 通道灰阶是等效的（网络第一层会自适应通道数权重）——但如果模型文件本身确实是 1 通道，改 RGB 可能不兼容。更安全的办法是用 SSNE_BYTES 替代 SSNE_Y_8。
+
+        

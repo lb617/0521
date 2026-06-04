@@ -1,0 +1,4 @@
+config BR2_PACKAGE_MOUSE_FACE_DEMO
+    bool "Mouse Face Detection Demo"
+    help
+        Mouse face detection with quality assessment, face cropping, and grimace scoring.

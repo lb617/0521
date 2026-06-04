@@ -1,0 +1,102 @@
+================================================================================
+小鼠面部检测 SDK 主程序 — 实施记录
+================================================================================
+
+项目: SmartSens SC235HAI (M1 Pro) SoC
+方案: 独立 Buildroot 包 (mouse_face_demo)
+
+================================================================================
+一、实现的文件清单
+================================================================================
+
+新建文件 (10个):
+  smart_software/package/mouse_face_demo/Config.in
+  smart_software/package/mouse_face_demo/mouse_face_demo.mk
+  smart_software/src/app_demo/mouse_face_detection/CMakeLists.txt
+  smart_software/src/app_demo/mouse_face_detection/demo_mouse_face.cpp
+  smart_software/src/app_demo/mouse_face_detection/include/common.hpp
+  smart_software/src/app_demo/mouse_face_detection/include/utils.hpp
+  smart_software/src/app_demo/mouse_face_detection/src/mouse_face_pipeline.cpp
+  smart_software/src/app_demo/mouse_face_detection/src/utils.cpp
+  smart_software/src/app_demo/mouse_face_detection/scripts/run.sh
+  smart_software/src/app_demo/mouse_face_detection/cmake_config/Paths.cmake
+
+复制文件 (6个, 从 face_detection/ssne_ai_demo):
+  smart_software/src/app_demo/mouse_face_detection/include/osd-device.hpp
+  smart_software/src/app_demo/mouse_face_detection/include/log.hpp
+  smart_software/src/app_demo/mouse_face_detection/src/osd-device.cpp
+  smart_software/src/app_demo/mouse_face_detection/src/pipeline_image.cpp
+  smart_software/src/app_demo/mouse_face_detection/app_assets/colorLUT.sscl
+  smart_software/src/app_demo/mouse_face_detection/app_assets/shared_colorLUT.sscl
+
+模型文件 (3个):
+  smart_software/src/app_demo/mouse_face_detection/app_assets/models/frame_quality_lite.m1model
+  smart_software/src/app_demo/mouse_face_detection/app_assets/models/face_cropper_lite.m1model
+  smart_software/src/app_demo/mouse_face_detection/app_assets/models/grimace_scorer_lite.m1model
+
+修改文件 (2个):
+  smart_software/Config.in                   — 添加了 source mouse_face_demo/Config.in
+  smart_software/configs/smartsens_m1pro_release_defconfig  — 添加了 BR2_PACKAGE_MOUSE_FACE_DEMO=y
+
+================================================================================
+二、编译命令
+================================================================================
+
+# 首次配置 + 编译新包
+make BR2_EXTERNAL=./smart_software smartsens_m1pro_release_defconfig
+make mouse_face_demo
+
+# 增量重编译 (修改源码后)
+rm -rf output/build/mouse_face_demo/
+make mouse_face_demo-rebuild
+
+# 生成完整镜像
+make -j32
+
+================================================================================
+三、运行时说明
+================================================================================
+
+目标路径: /app_demo/mouse_face_demo
+模型路径: /app_demo/app_assets/models/
+资产路径: /app_demo/app_assets/
+
+串行流水线:
+  Sensor (1920x1080 YUV422_16)
+    -> Preprocess Pipe 1 (YUV->Y8 224x224) -> frame_quality [1 float 0~1]
+    -> Preprocess Pipe 2 (YUV->RGB 256x256) -> face_cropper [x1,y1,x2,y2,conf]
+    -> Preprocess Pipe 3 (Crop+YUV->Y8 256x224) -> grimace_scorer [20 floats -> 5 scores]
+    -> OSD Layer 0 (检测框) + Layer 1 (分数色条) + Layer 2 (位图logo)
+
+可配置阈值:
+  QUALITY_THRESHOLD         = 0.5   (mouse_face_pipeline.cpp)
+  DET_CONFIDENCE_THRESHOLD  = 0.6   (mouse_face_pipeline.cpp)
+
+================================================================================
+四、待运行时验证
+================================================================================
+
+1. face_cropper 输出坐标是相对于 256x256 的归一化值还是像素值
+   - 当前假设: 相对于 256x256 输入空间的像素坐标，放大到原图
+
+2. grimace_scorer 的 20 个输出如何聚合为 5 个特征分
+   - 当前策略: 每 4 个连续值取平均
+
+3. SSNE_Y_8 格式在 preprocess pipe 中的兼容性
+   - YUV422->Y8 灰阶转换是否被硬件支持
+
+================================================================================
+五、文件用途说明
+================================================================================
+
+demo_mouse_face.cpp       — main(): 参数配置, 初始化, 主循环 (采集->推理->OSD)
+include/common.hpp        — 数据结构 MouseFaceResult, IMAGEPROCESSOR, MOUSE_FACE_PIPELINE 类
+include/utils.hpp         — VISUALIZER 类 (OSD 三层绘制)
+include/osd-device.hpp    — OsdDevice 类 (硬件 OSD 操作)
+include/log.hpp           — 编译期日志宏 (ENABLE_DEBUG_LOG)
+src/mouse_face_pipeline.cpp — *核心: 三模型加载/预处理/推理/后处理/流水线编排
+src/utils.cpp             — VISUALIZER 实现 (Draw/DrawGrimaceScores/DrawBitmap)
+src/pipeline_image.cpp    — IMAGEPROCESSOR 实现 (传感器帧采集)
+src/osd-device.cpp        — OsdDevice 实现 (DMA 缓冲区, OSD 图层)
+cmake_config/Paths.cmake  — SDK 库路径配置
+scripts/run.sh            — 启动脚本

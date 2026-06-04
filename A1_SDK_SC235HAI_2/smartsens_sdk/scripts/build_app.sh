@@ -1,5 +1,5 @@
 
 
-rm -rf output/build/ssne_ai_demo/
+rm -rf output/build/mouse_face_demo/
 
-make ssne_ai_demo-rebuild
+make mouse_face_demo-rebuild
